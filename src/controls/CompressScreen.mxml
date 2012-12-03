@@ -134,7 +134,8 @@
 				varNativeProcess.addEventListener(NativeProcessExitEvent.EXIT, onExit);
 				var os:String = flash.system.Capabilities.os.substr(0, 3);
 				if (os == "Win") {
-					varExeFile = File.applicationDirectory.resolvePath("7zip.exe");
+					//varExeFile = File.applicationDirectory.resolvePath("7zip.exe");
+					varExeFile = new File('c:\\Progra~1\\7-zip\\7z.exe');
 				} else if (os == "Mac") {
 					varExeFile = new File('/usr/bin/zip');
 				} else {
@@ -148,14 +149,29 @@
 				{
 					file.createDirectory();
 				}
+				
 				startupInfo.workingDirectory = file;
 
 				var processArgs:Vector.<String> = new Vector.<String>();	
 				var startIndex:int = source.nativePath.lastIndexOf(File.separator);
 				zipName = source.nativePath.substring(startIndex + 1) + ".zip";
 				
-				processArgs.push("-rjFS",zipName, source.nativePath);
+				//删除旧zip
+				var fileReference:File = new File();
+				fileReference.nativePath = File.documentsDirectory.nativePath + File.separator + "PIMPackageData" + File.separator + zipName;
+				if (fileReference.exists)
+				{
+					fileReference.moveToTrash();
+				}
 				
+				if (os == "Win") {
+					processArgs.push("a",zipName, source.nativePath + File.separator + "*");
+				} else if (os == "Mac") {
+					processArgs.push("-rjFS",zipName, source.nativePath);
+				} else {
+					trace("Must be Unix or Linux");
+				}
+								
 				startupInfo.arguments = processArgs;
 				trace(processArgs);
 				
