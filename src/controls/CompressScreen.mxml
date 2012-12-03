@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Canvas xmlns:mx="http://www.adobe.com/2006/mxml"
+		   xmlns:ns="library://ns.adobe.com/flashx/textLayout"
+		   xmlns:s="library://ns.adobe.com/flex/spark"
+		   label="打包"
+		   >
+	<mx:Script>
+		<![CDATA[
+			
+			import flash.filesystem.File;
+			
+			import mx.controls.Alert;
+			
+			public var varLogOutput:String ="";
+			private var varExeFile:File;
+			private var varNativeProcess:NativeProcess;
+			private var source:File;
+			private var destination:File;
+			private var zipName:String;
+			
+			//upload related
+			private var urlRequest:URLRequest;
+			private var serverSideScript:String = "http://localhost/aptana/xiong/index.php/login/uploadPimFile";
+			
+			
+			[Bindable]
+			private var valid:Boolean = false;
+			
+			private function responseHandler( evt:DataEvent ) :void
+			{
+				trace(evt.data);
+				try{
+					var XMLResults:XML = XML(evt.data);
+					if (XMLResults.result == "true")
+					{
+						statusTxt.text = "上传成功! " + zipName;
+						//statusTxt.text = source.nativePath + "打包完成!请选择新的需要打包的文件";
+						//删除已上传成功的zip
+						var fileReference:File = new File();
+						fileReference.nativePath = File.documentsDirectory.nativePath + File.separator + "PIMPackageData" + File.separator + zipName;
+						fileReference.moveToTrash();
+					}
+					else if (XMLResults.result == "false")
+					{
+						statusTxt.text = "上传错误! " + zipName + ":" + XMLResults.info;
+					}
+				}
+				catch(err:Error)
+				{
+					statusTxt.text = "上传错误! " + zipName + "!" + err.toString();
+				}
+			} 
+			
+			private function uploadCompleteHandler(event:Event):void {
+			}
+			
+			
+			public function onExit(e:NativeProcessExitEvent):void {
+				trace("Native Process Exit code: "+e.exitCode);
+				source = null;
+				checkCompressForm();
+				//打包成功
+				if (e.exitCode == 0)
+				{
+					//上传zip文件
+					urlRequest = new URLRequest(serverSideScript);
+					var fileReference:File = new File();
+					fileReference.nativePath = File.documentsDirectory.nativePath + File.separator + "PIMPackageData" + File.separator + zipName;
+					
+					// upload the file to the server side script
+					fileReference.addEventListener(Event.COMPLETE, uploadCompleteHandler);
+					fileReference.addEventListener(ProgressEvent.PROGRESS,fileProgressHandler);//Upload Progress
+					fileReference.addEventListener(HTTPStatusEvent.HTTP_STATUS,fileErrorHandler);//HTTP Error
+					fileReference.addEventListener(IOErrorEvent.IO_ERROR,fileErrorHandler);//IO Error
+					fileReference.addEventListener(SecurityErrorEvent.SECURITY_ERROR,fileErrorHandler);//Security Sandbox Error
+					fileReference.addEventListener(ProgressEvent.PROGRESS,fileProgressHandler);//Upload Progress
+					fileReference.addEventListener(DataEvent.UPLOAD_COMPLETE_DATA, responseHandler);
+					
+					fileReference.upload(urlRequest);
+					statusTxt.text = "上传中...";
+				}
+			}
+			
+
+			
+			private function fileErrorHandler(event:Event):void
+			{
+				Alert.show("File upload failed.","Error");
+				//For debugging you should see the entire error dump.
+				Alert.show(event.toString());
+			}
+			
+			//Set ProgressBar progress to match upload progress
+			private function fileProgressHandler(event:ProgressEvent):void
+			{
+				//Calculate percentage uploaded.
+				var percentage:uint= Math.round(event.bytesLoaded*100/event.bytesTotal);
+				//Set progressBar progress.
+				progressBar.setProgress(percentage,100);
+				//Update progressBar label.
+				progressBar.label=percentage+'%';
+			}
+			
+			private function onOutputData(evt:ProgressEvent):void{
+				varLogOutput +="\n"+varNativeProcess.standardOutput.readUTFBytes(varNativeProcess.standardOutput.bytesAvailable);
+				var varTempFile:File = File.documentsDirectory.resolvePath("PIMlog.txt");
+				var varFs:FileStream = new FileStream();
+				varFs.open(varTempFile,FileMode.WRITE);
+				varFs.writeUTF(varLogOutput);				
+				varFs.close();
+			}
+			
+			private function onErrorData(evt: ProgressEvent):void{
+				varLogOutput +="\n"+varNativeProcess.standardError.readUTFBytes(varNativeProcess.standardError.bytesAvailable);
+				var varTempFile:File = File.documentsDirectory.resolvePath("PIMerr.txt");
+				var varFs:FileStream = new FileStream();
+				varFs.open(varTempFile,FileMode.WRITE);
+				varFs.writeUTF(varLogOutput);	
+				varFs.close();
+				statusTxt.text = source.nativePath + "打包错误,详情见PIMerr.txt";
+				
+			}
+			
+			public function compressFolder():void{
+				//设置脚本地址
+				if (ipUrl.text != "")
+				{
+					serverSideScript = ipUrl.text + "/index.php/login/uploadPimFile";
+				}
+				
+				varNativeProcess = new NativeProcess();
+				varNativeProcess.addEventListener(ProgressEvent.STANDARD_OUTPUT_DATA, onOutputData);
+				varNativeProcess.addEventListener(ProgressEvent.STANDARD_ERROR_DATA, onErrorData);
+				varNativeProcess.addEventListener(NativeProcessExitEvent.EXIT, onExit);
+				var os:String = flash.system.Capabilities.os.substr(0, 3);
+				if (os == "Win") {
+					varExeFile = File.applicationDirectory.resolvePath("7zip.exe");
+				} else if (os == "Mac") {
+					varExeFile = new File('/usr/bin/zip');
+				} else {
+					trace("Must be Unix or Linux");
+				}
+				var startupInfo:NativeProcessStartupInfo = new NativeProcessStartupInfo();
+				startupInfo.executable = varExeFile;
+				var file:File = new File();
+				file.nativePath = File.documentsDirectory.nativePath + File.separator + 'PIMPackageData';
+				if (!file.exists)
+				{
+					file.createDirectory();
+				}
+				startupInfo.workingDirectory = file;
+
+				var processArgs:Vector.<String> = new Vector.<String>();	
+				var startIndex:int = source.nativePath.lastIndexOf(File.separator);
+				zipName = source.nativePath.substring(startIndex + 1) + ".zip";
+				
+				processArgs.push("-rjFS",zipName, source.nativePath);
+				
+				startupInfo.arguments = processArgs;
+				trace(processArgs);
+				
+				try {
+					trace("pstart:" + new Date().getTime());
+					varNativeProcess.start(startupInfo);
+				} catch (e:IllegalOperationError) {
+					trace("Illegal Operation: "+e.toString());
+				} catch (ae:ArgumentError) {
+					trace("Argument Error: "+ae.toString());
+				} catch (e:Error) {
+					trace("Error: "+e.toString());
+				}
+			}
+			
+			private function chooseSource():void
+			{
+				if (source == null) { source = new File(); }
+				source.addEventListener(Event.SELECT, sourceSelectHandler);
+				source.browseForDirectory("请选择需要打包的PIM数据文件夹");
+			}
+			
+			private function sourceSelectHandler(event:Event):void
+			{
+				compressSourceTxt.text = source.nativePath;
+				checkCompressForm();
+			}
+			
+			private function checkCompressForm():void
+			{
+				valid = (source != null && source.isDirectory);
+				
+				if (valid)
+				{
+					statusTxt.text = "点击 \"打包\" 开始打包PIM数据";
+				}
+			}
+		]]>
+	</mx:Script>
+	<s:VGroup>
+		<s:Label width="400" height="20" paddingLeft="10" text="请指定PIM测试数据保存地址，例如D:\PIM DATA"
+				 textAlign="left" verticalAlign="middle"/>
+		<s:HGroup paddingLeft="10">
+			<s:TextInput id="compressSourceTxt" width="300" editable="false"/>
+			<s:Button width="70" label="选择" click="chooseSource();"/>
+		</s:HGroup>
+		<s:HGroup paddingLeft="10">
+			<s:Button label="打包" click="compressFolder();" enabled="{ valid }"/>
+		</s:HGroup>
+		<s:Label id="statusTxt" width="400" height="40" paddingLeft="10" text="选择文件夹打包"
+				 verticalAlign="middle"/>
+		<s:HGroup paddingLeft="10">
+			<mx:ProgressBar id="progressBar" width="380" height="40" label="0%" alpha="100"
+							horizontalCenter="0" indeterminate="false" labelPlacement="center"
+							maximum="100" minimum="0" mode="manual" verticalCenter="0"/>
+		</s:HGroup>
+		<s:TextInput id="ipUrl" width="400" height="20" />
+	</s:VGroup>
+</mx:Canvas>
